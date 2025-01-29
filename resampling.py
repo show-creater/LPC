@@ -1,7 +1,7 @@
 import librosa
 import soundfile as sf
 
-for i in range(1, 11):
+for i in range(1, 10):
 
     fname = f'./edited_sounds/{i}_2.wav'
     target_fs = 8000
