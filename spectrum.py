@@ -1,41 +1,55 @@
-from scipy.io.wavfile import read
 import numpy as np
-import matplotlib.pyplot as plt
-from calc import compute_lpc
 from scipy.signal import freqz
+from scipy.linalg import solve_toeplitz
+import librosa
+from write_excel import write_excel
+from standardization import concat_and_standardization
 
-for i in range(1,10):
-    fname = f'./resampled_sounds/{i}_1.wav'
-    fs, data = read(fname)
+def compute_lpc(signal, p):
+    """
+    LPC係数を計算
+    """
+    r = np.correlate(signal, signal, mode='full')
+    r = r[len(signal)-1:len(signal)+p]
+    a = solve_toeplitz((r[:-1], r[:-1]), -r[1:])
+    return np.concatenate(([1], a))
 
-    if len(data.shape) == 2:
-        data = data[:, 0]
+def find_formants(signal, fs, p=12, intns_threshold=0.6, min_distance=200):
 
-    time = np.arange(0, len(data)) / fs
-    p = 16
-    Fs = 8000
-
-    a = compute_lpc(data, p)
-
-    # LPC係数を計算
-    lpc_coeffs = compute_lpc(data, p)
-
-    # 周波数応答を計算
-    w, h = freqz(1, lpc_coeffs, worN=512)
-
-    frequencies = w * Fs / (2 * np.pi)
-
+    a = compute_lpc(signal, p)
+    
     poles = np.roots(a)
-
-    poles = poles[np.abs(poles) < 1.0]
-
-    ff = np.angle(poles) * fs / (2.0 * np.pi)
-
     intns = np.abs(poles)
+    ff = np.angle(poles) * fs / (2 * np.pi)
 
-    # 50Hz以上 & ナイキスト周波数以下のフォルマントのみ使用（要確認）
-    formantfreq = ff[(ff > 50) & (ff < fs / 2.0) & (intns > 0.85)]
+    formantfreq = ff[(ff > 200) & (ff < 3500) & (intns > intns_threshold)]
 
-    formants = np.sort(formantfreq)
+    filtered_formants = []
+    for f in np.sort(formantfreq):
+        if len(filtered_formants) == 0 or abs(f - filtered_formants[-1]) > min_distance:
+            filtered_formants.append(f)
 
-    print(f"{i}のフォルマント周波数 (Hz):", formants)
+    F1 = filtered_formants[0] if len(filtered_formants) > 0 else None
+    F2 = filtered_formants[1] if len(filtered_formants) > 1 else None
+
+    return F1, F2
+
+x=1
+standarded_data_list = []
+
+for j in range(1, 4):
+    spectrum_data = [[], []]
+    for i in range(1, 10):
+        y, sr = librosa.load(f"resampled_sounds/{i}_{j}.wav", sr=8000)
+        y_preemphasized = librosa.effects.preemphasis(y)
+
+        F1, F2 = find_formants(y_preemphasized, sr, p=13, intns_threshold=0.6)
+        print(f"[{i}の周波数フォルマント] のF1: {F1} Hz, F2: {F2} Hz")
+        spectrum_data[0].append(F1)
+        spectrum_data[1].append(F2)
+
+    write_excel(spectrum_data, j)
+    data = {'F1': spectrum_data[0], 'F2': spectrum_data[1], 'ラベル': [1, 2, 3, 4, 5, 6, 7, 8, 9], '話者': [j]*9}
+    standarded_data_list.append(data)
+    concat_and_standardization(standarded_data_list)
+
